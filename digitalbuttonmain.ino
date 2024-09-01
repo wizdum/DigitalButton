@@ -1,4 +1,3 @@
-
 // This example if for processors with LittleFS capability (e.g. RP2040,
 // ESP32, ESP8266). It renders a png file that is stored in LittleFS
 // using the PNGdec library (available via library manager).
@@ -18,6 +17,16 @@ Then compile and upload the sketch.
 
 
 */
+
+/* 
+################### To - Do ###############################
+1. Download .txt file from github with list of .png urls
+2. function that clears .png files from LittleFS storage
+3. web server function that launches on WiFi failure and allows you to 
+  list PNG URLs and set WiFi SSID and Password.
+##################################################
+*/
+
 
 // Added to download file
 #include <WiFi.h>
@@ -105,7 +114,9 @@ void setup()
 
   // Download and save the file
   downloadAndSaveFile(fileURL, filePath);
-  delay(5000)
+  // Check and print the size of the downloaded file
+
+  printFileSize(filePath);
 }
 
 
@@ -162,31 +173,68 @@ void pngDraw(PNGDRAW *pDraw) {
 void downloadAndSaveFile(const char* fileURL, const char* filePath) {
   HTTPClient http;
   http.begin(fileURL, rootCACertificate);
-  int httpCode = http.GET();
-
-  if (httpCode > 0) {
-    if (httpCode == HTTP_CODE_OK) {
-      // Open file for writing
-      File file = LittleFS.open(filePath, "w");
-      if (!file) {
+  http.setTimeout(5000);
+  // Assuming http is an instance of HTTPClient
+if (http.GET() == HTTP_CODE_OK) {
+    WiFiClient *stream = http.getStreamPtr();
+    File file = LittleFS.open(filePath, "w");
+    if (!file) {
         Serial.println("Failed to open file for writing");
         return;
-      }
-      // Stream the file contents from the web and write to the file system
-      WiFiClient *stream = http.getStreamPtr();
-      uint8_t buffer[1024] = {0};
-      int bytesRead;
-      while ((bytesRead = stream->read(buffer, sizeof(buffer))) > 0) {
-        file.write(buffer, bytesRead);
-      }
-      file.close();
-      Serial.println("File downloaded and saved to LittleFS");
     }
 
-  } else {
-    Serial.printf("HTTP request failed: %s\n", http.errorToString(httpCode).c_str());
-  }
+    int totalBytes = http.getSize(); // Total expected size
+    int readBytes = 0;
+
+    // Read all data from server
+    while (http.connected() && (totalBytes > 0 || totalBytes == -1)) {
+        // Get available data size
+        size_t size = stream->available();
+
+        if (size) {
+            // Allocate a buffer to store incoming data
+            std::unique_ptr<char[]> buf(new char[size]);
+            // Read the data
+            int c = stream->readBytes(buf.get(), size);
+            file.write((uint8_t*)buf.get(), c);
+            readBytes += c;
+
+            if (totalBytes > 0) {
+                totalBytes -= c;
+            }
+        }
+        yield(); // Allow background tasks to run
+    }
+
+    Serial.print("Read ");
+    Serial.print(readBytes);
+    Serial.println(" bytes");
+    file.close();
+} else {
+    Serial.print("Error on HTTP request: ");
+    Serial.println(http.errorToString(http.GET()).c_str());
+}
 
   http.end();
+
+}
+
+void printFileSize(const char* filePath) {
+  if(!LittleFS.exists(filePath)){
+    Serial.println("File does not exist.");
+    return;
+  }
+  
+  File file = LittleFS.open(filePath, "r");
+  if(!file){
+    Serial.println("Failed to open file for reading.");
+    return;
+  }
+  Serial.print("Size of ");
+  Serial.print(filePath);
+  Serial.print(" is ");
+  Serial.print(file.size());
+  Serial.println(" bytes.");
+  file.close();
 
 }
