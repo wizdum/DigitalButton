@@ -1,0 +1,4 @@
+https://raw.githubusercontent.com/wizdum/digitalbutton/main/images/wah.png
+https://raw.githubusercontent.com/wizdum/digitalbutton/main/images/LAUGHING-esp32.png
+https://raw.githubusercontent.com/wizdum/digitalbutton/main/images/awoo.png
+https://raw.githubusercontent.com/wizdum/digitalbutton/main/images/blushwizdum.png
