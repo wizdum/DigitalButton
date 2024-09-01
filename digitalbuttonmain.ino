@@ -1,3 +1,4 @@
+
 // This example if for processors with LittleFS capability (e.g. RP2040,
 // ESP32, ESP8266). It renders a png file that is stored in LittleFS
 // using the PNGdec library (available via library manager).
@@ -24,6 +25,7 @@ Then compile and upload the sketch.
 2. function that clears .png files from LittleFS storage
 3. web server function that launches on WiFi failure and allows you to 
   list PNG URLs and set WiFi SSID and Password.
+4. Touch screen swipe to change image
 ##################################################
 */
 
@@ -35,8 +37,8 @@ Then compile and upload the sketch.
 
 const char* ssid = "IoTrash";
 const char* password = "!Kingston1255....";
-const char* fileURL = "https://raw.githubusercontent.com/wizdum/digitalbutton/main/wah.png";
-const char* filePath = "/wah.png";
+const char* fileURL = "https://raw.githubusercontent.com/wizdum/digitalbutton/main/imageURLs.txt";
+const char* filePath = "/imageURLs.txt";
 // Root CA certificate for the server
 
 const char* rootCACertificate = \
@@ -95,6 +97,14 @@ void setup()
     while (1) yield(); // Stay here twiddling thumbs waiting
   }
 
+  // Create a directory named "images"
+  if (!LittleFS.mkdir("/images")) {
+    Serial.println("Failed to create directory");
+    return;
+  } else {
+    Serial.println("Directory created");
+  }
+
   // Initialise the TFT
   tft.begin();
   tft.fillScreen(TFT_BLACK);
@@ -115,8 +125,8 @@ void setup()
   // Download and save the file
   downloadAndSaveFile(fileURL, filePath);
   // Check and print the size of the downloaded file
-
-  printFileSize(filePath);
+  //printFileSize(filePath);
+  processURLList("/imageURLs.txt");
 }
 
 
@@ -126,10 +136,10 @@ void setup()
 void loop()
 {
   // Scan LittleFS and load any *.png files
-  File root = LittleFS.open("/", "r");
+  File root = LittleFS.open("/images/", "r");
   while (File file = root.openNextFile()) {
     String strname = file.name();
-    strname = "/" + strname;
+    strname = "/images/" + strname;
     Serial.println(file.name());
     // If it is not a directory and filename ends in .png then load it
     if (!file.isDirectory() && strname.endsWith(".png")) {
@@ -170,7 +180,7 @@ void pngDraw(PNGDRAW *pDraw) {
   tft.pushImage(xpos, ypos + pDraw->y, pDraw->iWidth, 1, lineBuffer);
 }
 
-void downloadAndSaveFile(const char* fileURL, const char* filePath) {
+void downloadAndSaveFile(String fileURL, String filePath) {
   HTTPClient http;
   http.begin(fileURL, rootCACertificate);
   http.setTimeout(5000);
@@ -219,7 +229,7 @@ if (http.GET() == HTTP_CODE_OK) {
 
 }
 
-void printFileSize(const char* filePath) {
+void printFileSize(String filePath) {
   if(!LittleFS.exists(filePath)){
     Serial.println("File does not exist.");
     return;
@@ -237,4 +247,30 @@ void printFileSize(const char* filePath) {
   Serial.println(" bytes.");
   file.close();
 
+}
+
+void processURLList(String filePath) {
+  File urlList = LittleFS.open(filePath, "r");
+  if (!urlList) {
+    Serial.println("Failed to open URL list file for reading");
+    return;
+  }
+
+  while (urlList.available()) {
+    String url = urlList.readStringUntil('\n');
+    url.trim(); // Remove any leading/trailing whitespace
+    
+    if (url.length() > 0) {
+      // Assuming you have a predefined function to handle the file name extraction and download
+      String fileName = extractFileName(url);
+      downloadAndSaveFile(url, "/images/" + fileName);
+    }
+  }
+
+  urlList.close();
+}
+
+String extractFileName(String url) {
+  int lastSlashIndex = url.lastIndexOf('/');
+  return url.substring(lastSlashIndex + 1);
 }
