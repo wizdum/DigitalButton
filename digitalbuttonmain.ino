@@ -1,15 +1,4 @@
 
-// This example if for processors with LittleFS capability (e.g. RP2040,
-// ESP32, ESP8266). It renders a png file that is stored in LittleFS
-// using the PNGdec library (available via library manager).
-
-// The test image is in the sketch "data" folder (press Ctrl+K to see it).
-// You must upload the image to LittleFS using the Arduino IDE Tools Data
-// Upload menu option (you may need to install extra tools for that).
-
-// Don't forget to use the Arduino IDE Tools menu to allocate a LittleFS
-// memory partition before uploading the sketch and data!
-
 /*
 How to upload files to LittleFS with Arduino
 Ctrl – shift – P, choose “upload littlefs” 
@@ -21,8 +10,8 @@ Then compile and upload the sketch.
 
 /* 
 ################### To - Do ###############################
-1. Download .txt file from github with list of .png urls
-2. function that clears .png files from LittleFS storage
+#1. Download .txt file from github with list of .png urls
+#2. function that clears .png files from LittleFS storage
 3. web server function that launches on WiFi failure and allows you to 
   list PNG URLs and set WiFi SSID and Password.
 4. Touch screen swipe to change image
@@ -34,6 +23,11 @@ Then compile and upload the sketch.
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <FS.h>
+#include <WebServer.h>
+#include <stdlib.h> // For random number generation
+#include "CST816S.h"
+
+CST816S touch(6, 7, 13, 5);	// sda, scl, rst, irq
 
 const char* ssid = "IoTrash";
 const char* password = "!Kingston1255....";
@@ -65,6 +59,10 @@ const char* rootCACertificate = \
 "MrY=\n" \
 "-----END CERTIFICATE-----\n";
 // ^ Added to download file
+
+WebServer server(80); // HTTP server on port 80
+
+
 
 #include <LittleFS.h>
 #define FileSys LittleFS
@@ -105,6 +103,9 @@ void setup()
     Serial.println("Directory created");
   }
 
+  // Clear old PNG Files
+  //deletePngFiles("/");
+  //deletePngFiles("/images/");
   // Initialise the TFT
   tft.begin();
   tft.fillScreen(TFT_BLACK);
@@ -113,15 +114,29 @@ void setup()
 
   // Connect to WiFi
 
-  WiFi.begin(ssid, password);
-  Serial.println("Connecting to WiFi..");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    Serial.println("Connecting to WiFi..");
+  String ssid, password;
+  if (readWifiConfig(ssid, password)) {
+    connectToWifi(ssid, password);
+  } else {
+    Serial.println("Failed to read WiFi config");
+    startAccessPoint();
+    return;
   }
 
-  Serial.println("Connected to WiFi.");
-
+/*
+WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi..");
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.print(".");
+    if (++attempts >= 10) { // After 10 attempts, start AP
+      startAccessPoint();
+      return;
+    }
+  }
+  Serial.println("Connected to WiFi");
+*/
   // Download and save the file
   downloadAndSaveFile(fileURL, filePath);
   // Check and print the size of the downloaded file
@@ -135,6 +150,10 @@ void setup()
 //====================================================================================
 void loop()
 {
+    // If in AP mode, handle client requests
+  if (WiFi.getMode() & WIFI_MODE_AP) {
+    server.handleClient();
+  }
   // Scan LittleFS and load any *.png files
   File root = LittleFS.open("/images/", "r");
   while (File file = root.openNextFile()) {
@@ -163,6 +182,9 @@ void loop()
     }
     delay(3000);
     //tft.fillScreen(random(0x10000));
+  }
+  if (touch.available()){
+    Serial.println(touch.data.gestureID);
   }
 }
 
@@ -273,4 +295,134 @@ void processURLList(String filePath) {
 String extractFileName(String url) {
   int lastSlashIndex = url.lastIndexOf('/');
   return url.substring(lastSlashIndex + 1);
+}
+
+void deletePngFiles(String path) {
+  File root = LittleFS.open(path, "r");
+  if (!root) {
+    Serial.println("Failed to open directory");
+    return;
+  }
+  if (!root.isDirectory()) {
+    Serial.println("Not a directory");
+    return;
+  }
+  File file = root.openNextFile();
+  while (file) {
+    String fileName = file.name();
+    file.close(); // Ensure the file is closed before attempting to delete
+    if (fileName.endsWith(".png")) {
+      String fullPath = path + fileName; // Ensure the path is correctly formatted
+      // Attempt to delete the file
+      if (LittleFS.remove(fullPath)) {
+        Serial.println("Deleted: " + fullPath);
+      } else {
+        Serial.println("Failed to delete: " + fullPath);
+      }
+    }
+    file = root.openNextFile();
+  }
+}
+
+void startAccessPoint() {
+  String baseSSID = "ESP32-Config"; // Base SSID
+  String randomChars = "";
+  // Initialize random seed
+  randomSeed(analogRead(0));
+  // Generate three random characters and append to the base SSID
+  for (int i = 0; i < 3; i++) {
+    randomChars += generateRandomChar();
+  }
+  String fullSSID = baseSSID + randomChars; // Concatenate base SSID with random characters
+
+  WiFi.softAP(fullSSID.c_str(), ""); // Start the AP with the new SSID
+  Serial.println("Started Access Point");
+  Serial.print("Access Point Web Server URL: http://192.168.4.1");
+  tft.setTextSize(2); // Adjust the number to increase text size
+  String text = "AP IP address: 192.168.4.1"; // Example text
+  int textSize = 2; // Example text size
+  int charWidth = 6 * textSize; // Approximate width of a character
+  int charHeight = 8 * textSize; // Approximate height of a character
+
+  int textWidth = text.length() * charWidth;
+  int textHeight = charHeight; // Assuming single line of text
+
+  int xPosition = (tft.width() - textWidth) / 2; // Center horizontally
+  //int yPosition = (tft.height() - textHeight) / 2; // Center vertically
+  tft.setCursor(xPosition, 55);
+  //tft.setCursor(0, 0); // Set cursor at top left corner
+
+  tft.println("      AP Mode");
+  tft.println("  SSID: ");
+  tft.println(fullSSID);
+  tft.println("  URL: http://");
+  tft.println("  192.168.4.1"); // Display the IP address as a string
+
+  server.on("/", HTTP_GET, []() {
+    server.send(200, "text/html", "<form action=\"/save\" method=\"POST\"><input type=\"text\" name=\"ssid\" placeholder=\"SSID\"><br><input type=\"password\" name=\"password\" placeholder=\"Password\"><br><input type=\"submit\" value=\"Save\"></form>");
+  });
+
+  server.on("/save", HTTP_POST, []() {
+    String ssid = server.arg("ssid");
+    String password = server.arg("password");
+    saveCredentials(ssid, password);
+    server.send(200, "text/html", "<h1>Credentials saved. Please reset the device.</h1>");
+    // Optionally, you could attempt to connect to WiFi here using the new credentials
+  });
+
+  server.begin();
+}
+
+void saveCredentials(String ssid, String password) {
+  File file = LittleFS.open("/config.txt", "w");
+  if (!file) {
+    Serial.println("Failed to open config file for writing");
+    return;
+  }
+  file.println(ssid);
+  file.println(password);
+  file.close();
+  Serial.println("Credentials saved");
+}
+
+char generateRandomChar() {
+  int randomValue = random(48, 123); // Generate a random number between 48 and 122
+  // Ensure the value is within the alphanumeric range
+  if ((randomValue > 57 && randomValue < 65) || (randomValue > 90 && randomValue < 97)) {
+    return generateRandomChar(); // Recursively generate a different character if it's not alphanumeric
+  }
+  return (char)randomValue; // Cast the random value to a char and return it
+}
+
+bool readWifiConfig(String &ssid, String &password) {
+  File configFile = LittleFS.open("/config.txt", "r");
+  if (!configFile) {
+    Serial.println("Failed to open config file");
+    return false;
+  }
+
+  ssid = configFile.readStringUntil('\n');
+  password = configFile.readStringUntil('\n');
+
+  // Remove any trailing newline or carriage return characters
+  ssid.trim();
+  password.trim();
+
+  configFile.close();
+  return true;
+}
+
+void connectToWifi(const String &ssid, const String &password) {
+  WiFi.begin(ssid.c_str(), password.c_str());
+  
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
+  Serial.print("Connected to ");
+  Serial.println(ssid);
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
 }
