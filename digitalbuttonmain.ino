@@ -25,7 +25,7 @@ Then compile and upload the sketch.
 #include <FS.h>
 #include <WebServer.h>
 #include <stdlib.h> // For random number generation
-#include "CST816S.h"
+#include <CST816S.h> // touch library
 
 CST816S touch(6, 7, 13, 5);	// sda, scl, rst, irq
 
@@ -62,7 +62,9 @@ const char* rootCACertificate = \
 
 WebServer server(80); // HTTP server on port 80
 
-
+unsigned long apStartTime = 0; // To store the time AP mode was started
+const unsigned long apDuration = 600000; // 10 minutes in milliseconds (10 * 60 * 1000)
+bool apModeActive = false; // To keep track of whether AP mode is currently active
 
 #include <LittleFS.h>
 #define FileSys LittleFS
@@ -81,6 +83,13 @@ int16_t ypos = 0;
 #include <TFT_eSPI.h>              // Hardware-specific library
 TFT_eSPI tft = TFT_eSPI();         // Invoke custom library
 
+
+struct TouchPoint {
+  int x = 0;
+  int y = 0;
+  bool isTouched = false;
+};
+
 //====================================================================================
 //                                    Setup
 //====================================================================================
@@ -88,6 +97,8 @@ void setup()
 {
   Serial.begin(115200);
   Serial.println("\n\n Using the PNGdec library");
+  
+  touch.begin();
 
   // Initialise FS
   if (!FileSys.begin()) {
@@ -156,6 +167,7 @@ void loop()
   }
   // Scan LittleFS and load any *.png files
   File root = LittleFS.open("/images/", "r");
+  /*
   while (File file = root.openNextFile()) {
     String strname = file.name();
     strname = "/images/" + strname;
@@ -183,9 +195,38 @@ void loop()
     delay(3000);
     //tft.fillScreen(random(0x10000));
   }
-  if (touch.available()){
-    Serial.println(touch.data.gestureID);
+  */
+/*
+int16_t rc = png.open("/images/awoo.png", pngOpen, pngClose, pngRead, pngSeek, pngDraw);
+if (rc == PNG_SUCCESS) {
+  tft.startWrite();
+  Serial.printf("image specs: (%d x %d), %d bpp, pixel type: %d\n", png.getWidth(), png.getHeight(), png.getBpp(), png.getPixelType());
+  uint32_t dt = millis();
+    if (png.getWidth() > MAX_IMAGE_WDITH) {
+    Serial.println("Image too wide for allocated line buffer size!");
+    }
+    else {
+      rc = png.decode(NULL, 0);
+      png.close();
+    }
+  tft.endWrite();
+  // How long did rendering take...
+  Serial.print(millis()-dt); Serial.println("ms");
+}
+*/
+  TouchPoint currentPoint = readTouchPoint();
+  String gesture = detectSwipeGesture(currentPoint);
+  if (gesture != "No Swipe") {
+    Serial.println(gesture);
   }
+
+if (apModeActive && millis() - apStartTime >= apDuration) {
+    // 10 minutes have passed, turn off the AP
+    WiFi.softAPdisconnect(true); // Disconnect and disable the AP
+    apModeActive = false; // Set AP mode as inactive
+    Serial.println("AP Mode turned off");
+  }
+
 }
 
 
@@ -338,6 +379,10 @@ void startAccessPoint() {
   WiFi.softAP(fullSSID.c_str(), ""); // Start the AP with the new SSID
   Serial.println("Started Access Point");
   Serial.print("Access Point Web Server URL: http://192.168.4.1");
+  
+  apStartTime = millis(); // Record the time AP mode started
+  apModeActive = true; // Set AP mode as active
+  
   tft.setTextSize(2); // Adjust the number to increase text size
   String text = "AP IP address: 192.168.4.1"; // Example text
   int textSize = 2; // Example text size
@@ -425,4 +470,50 @@ void connectToWifi(const String &ssid, const String &password) {
   Serial.println(ssid);
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
+}
+
+TouchPoint readTouchPoint() {
+  TouchPoint point;
+  // Assuming your library has a method to check if the screen is being touched
+  // and methods to get the current touch coordinates
+  if (touch.available()) {
+    point.x = touch.data.x;
+    point.y = touch.data.y;
+    point.isTouched = true;
+  }
+  return point;
+}
+
+// Global variables to hold the start touch point and a flag to indicate a gesture is in progress
+TouchPoint startTouchPoint;
+bool gestureInProgress = false;
+
+// Function to detect swipe gesture
+String detectSwipeGesture(TouchPoint currentPoint) {
+  if (currentPoint.isTouched && !gestureInProgress) {
+    // Touch start
+    if (!startTouchPoint.isTouched) {
+      startTouchPoint = currentPoint;
+      gestureInProgress = true;
+    }
+  } else if (gestureInProgress && !currentPoint.isTouched) {
+    // Touch end, check for swipe
+    int deltaX = currentPoint.x - startTouchPoint.x;
+    int deltaY = currentPoint.y - startTouchPoint.y;
+    
+    // Reset for next gesture
+    startTouchPoint.isTouched = false;
+    gestureInProgress = false;
+    
+    if (abs(deltaX) > 50 || abs(deltaY) > 50) { // Threshold for swipe detection
+      if (abs(deltaX) > abs(deltaY)) {
+        // Horizontal swipe
+        return deltaX > 0 ? "Swipe Right" : "Swipe Left";
+      } else {
+        // Vertical swipe
+        return deltaY > 0 ? "Swipe Down" : "Swipe Up";
+      }
+    }
+  }
+  return "No Swipe";
 }
